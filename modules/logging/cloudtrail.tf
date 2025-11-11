@@ -5,6 +5,63 @@ locals {
   bucket_name = "logs-${var.org_env}-${local.account_id}"
 }
 
+# KMS key for CloudTrail encryption
+resource "aws_kms_key" "cloudtrail" {
+  description             = "KMS key for CloudTrail logs encryption"
+  deletion_window_in_days = 10
+  enable_key_rotation     = true
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "Enable IAM User Permissions"
+        Effect = "Allow"
+        Principal = {
+          AWS = "arn:aws:iam::${local.account_id}:root"
+        }
+        Action   = "kms:*"
+        Resource = "*"
+      },
+      {
+        Sid    = "Allow CloudTrail to encrypt logs"
+        Effect = "Allow"
+        Principal = {
+          Service = "cloudtrail.amazonaws.com"
+        }
+        Action = [
+          "kms:GenerateDataKey*",
+          "kms:DecryptDataKey"
+        ]
+        Resource = "*"
+        Condition = {
+          StringLike = {
+            "kms:EncryptionContext:aws:cloudtrail:arn" = "arn:aws:cloudtrail:*:${local.account_id}:trail/*"
+          }
+        }
+      },
+      {
+        Sid    = "Allow CloudTrail to describe key"
+        Effect = "Allow"
+        Principal = {
+          Service = "cloudtrail.amazonaws.com"
+        }
+        Action   = "kms:DescribeKey"
+        Resource = "*"
+      }
+    ]
+  })
+
+  tags = {
+    Name = "cloudtrail-${var.org_env}"
+  }
+}
+
+resource "aws_kms_alias" "cloudtrail" {
+  name          = "alias/cloudtrail-${var.org_env}"
+  target_key_id = aws_kms_key.cloudtrail.key_id
+}
+
 resource "aws_s3_bucket" "logs" {
   bucket = local.bucket_name
 
@@ -18,7 +75,8 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "logs" {
 
   rule {
     apply_server_side_encryption_by_default {
-      sse_algorithm = "AES256"
+      sse_algorithm     = "aws:kms"
+      kms_master_key_id = aws_kms_key.cloudtrail.arn
     }
     bucket_key_enabled = true
   }
@@ -81,6 +139,7 @@ resource "aws_cloudtrail" "main" {
   is_multi_region_trail         = true
   enable_logging                = true
   enable_log_file_validation    = true
+  kms_key_id                    = aws_kms_key.cloudtrail.arn
 
   tags = {
     Name = "cloudtrail-${var.org_env}"
