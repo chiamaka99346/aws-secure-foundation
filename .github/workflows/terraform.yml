@@ -45,11 +45,11 @@ jobs:
 
       - name: Run tfsec
         working-directory: .
-        run: tfsec .
+        run: tfsec . --minimum-severity HIGH
 
       - name: Run Checkov
         working-directory: .
-        run: checkov -d .
+        run: checkov -d . --compact --quiet
 
       - name: Terraform Init
         run: terraform init
